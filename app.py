@@ -1,36 +1,33 @@
 from flask import Flask, request, jsonify, render_template
 import os
 import speech_recognition as sr
-import requests
+from transformers import pipeline
 from pydub import AudioSegment
 
 app = Flask(__name__)
 
-# Hugging Face API Key (Replace with your actual key)
-HF_API_KEY = "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"
-HF_API_URL = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
-HEADERS = {"Authorization": f"Bearer {HF_API_KEY}"}
+# Load Summarization Model Locally (No API Key Required)
+summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
 
-# Transcribe each audio chunk
+# Transcribe Audio Using SpeechRecognition
 def transcribe_audio(file_path):
     recognizer = sr.Recognizer()
-    audio_file = sr.AudioFile(file_path)
-
-    try:
-        with audio_file as source:
-            audio_data = recognizer.record(source)
-            transcription = recognizer.recognize_google(audio_data)
+    with sr.AudioFile(file_path) as source:
+        audio_data = recognizer.record(source)
+        try:
+            transcription = recognizer.recognize_google(audio_data)  # Google Speech-to-Text
             return transcription
-    except Exception as e:
-        print(f"Transcription error: {str(e)}")
-        raise
+        except sr.UnknownValueError:
+            return "Could not understand the audio."
+        except sr.RequestError as e:
+            return f"Speech Recognition Error: {e}"
 
 # Split audio into chunks
 def split_audio(file_path, chunk_length_ms=30000):
     audio = AudioSegment.from_wav(file_path)
     total_length_ms = len(audio)
     chunks = []
-    
+
     for i in range(0, total_length_ms, chunk_length_ms):
         chunk = audio[i:i+chunk_length_ms]
         chunk_filename = f"{file_path}_chunk{i}.wav"
@@ -39,19 +36,6 @@ def split_audio(file_path, chunk_length_ms=30000):
 
     return chunks
 
-# Function to summarize text using Hugging Face API
-def summarize_text(text):
-    try:
-        response = requests.post(HF_API_URL, headers=HEADERS, json={"inputs": text})
-        response_json = response.json()
-        
-        if "error" in response_json:
-            return f"API Error: {response_json['error']}"
-
-        return response_json[0]["summary_text"]
-    except Exception as e:
-        return f"Summarization API error: {str(e)}"
-
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -59,14 +43,13 @@ def index():
 @app.route('/summarize', methods=['POST'])
 def summarize():
     if 'audio_file' not in request.files:
-        return jsonify({"error": "No file part"})
+        return jsonify({"error": "No file uploaded"})
 
     audio_file = request.files['audio_file']
 
     if audio_file.filename == '':
         return jsonify({"error": "No selected file"})
 
-    # Save the audio file to the 'uploads' folder
     file_path = os.path.join('uploads', audio_file.filename)
     audio_file.save(file_path)
 
@@ -81,11 +64,11 @@ def summarize():
 
     # Split the audio into chunks
     try:
-        audio_chunks = split_audio(file_path, chunk_length_ms=30000)  # Split into 30-second chunks
+        audio_chunks = split_audio(file_path, chunk_length_ms=30000)  # 30-second chunks
     except Exception as e:
         return jsonify({"error": f"Audio splitting failed: {str(e)}"})
 
-    # Transcribe each audio chunk
+    # Transcribe each chunk
     combined_transcription = ""
     try:
         for chunk_path in audio_chunks:
@@ -94,10 +77,16 @@ def summarize():
     except Exception as e:
         return jsonify({"error": f"Transcription failed: {str(e)}"})
 
-    # Summarize the combined transcription using Hugging Face API
-    summary = summarize_text(combined_transcription)
+    # Ensure transcription isn't empty before summarization
+    if not combined_transcription.strip():
+        return jsonify({"error": "Transcription is empty, please check the audio quality."})
 
-    # Return both transcription and summary
+    # Summarize Transcription
+    try:
+        summary = summarizer(combined_transcription, max_length=150, min_length=50, do_sample=False)[0]['summary_text']
+    except Exception as e:
+        return jsonify({"error": f"Summarization failed: {str(e)}"})
+
     return jsonify({"transcription": combined_transcription, "summary": summary})
 
 if __name__ == "__main__":
