@@ -1,83 +1,39 @@
-from flask import Flask, request, jsonify, render_template
 import os
-import speech_recognition as sr
-from transformers import pipeline
-from pydub import AudioSegment
-import math
+from flask import Flask, request, jsonify, render_template
+from transformers import pipeline, AutoModelForSeq2SeqLM, AutoTokenizer
+import torch
 
 app = Flask(__name__)
 
-# Load Summarization Model (Optimized)
-summarizer = pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
+# Load the summarization model
+MODEL_NAME = "facebook/bart-large-cnn"
+tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+model = AutoModelForSeq2SeqLM.from_pretrained(MODEL_NAME)
 
-# Function to transcribe audio using SpeechRecognition
-def transcribe_audio(audio_path):
-    recognizer = sr.Recognizer()
-    with sr.AudioFile(audio_path) as source:
-        audio_data = recognizer.record(source)
-        try:
-            text = recognizer.recognize_google(audio_data)  # Google Speech API (Free & No Token Limit)
-            return text
-        except sr.UnknownValueError:
-            return "Speech was unclear. Unable to transcribe."
-        except sr.RequestError:
-            return "Could not request results from Google Speech Recognition."
+def summarize_text(text):
+    """Summarizes the given text using the Hugging Face model."""
+    inputs = tokenizer(text, return_tensors="pt", max_length=1024, truncation=True)
+    summary_ids = model.generate(inputs.input_ids, max_length=200, min_length=50, length_penalty=2.0, num_beams=4, early_stopping=True)
+    summary = tokenizer.decode(summary_ids[0], skip_special_tokens=True)
+    return summary
 
-# Function to split text into chunks (if text is too long)
-def split_text(text, max_chunk_length=400):
-    words = text.split()
-    chunks = []
-    chunk = []
-    length = 0
-    for word in words:
-        chunk.append(word)
-        length += len(word) + 1
-        if length > max_chunk_length:
-            chunks.append(" ".join(chunk))
-            chunk = []
-            length = 0
-    if chunk:
-        chunks.append(" ".join(chunk))
-    return chunks
-
-@app.route("/")
+@app.route('/')
 def home():
-    return render_template("index.html")
+    return render_template('index.html')
 
-@app.route("/summarize", methods=["POST"])
+@app.route('/summarize', methods=['POST'])
 def summarize():
-    if "audio_file" not in request.files:
-        return jsonify({"error": "No file uploaded"}), 400
+    try:
+        text = request.form.get('text')  # Get the text input from the form
+        if not text:
+            return jsonify({'error': 'No text provided for summarization'}), 400
+        
+        summary = summarize_text(text)
+        return jsonify({'summary': summary})
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
-    audio_file = request.files["audio_file"]
-    if audio_file.filename == "":
-        return jsonify({"error": "No file selected"}), 400
-
-    # Save uploaded audio file
-    audio_path = "uploaded_audio.wav"
-    audio_file.save(audio_path)
-
-    # Transcribe audio
-    transcription = transcribe_audio(audio_path)
-
-    # Handle empty transcription case
-    if not transcription or "Unable to transcribe" in transcription:
-        return jsonify({"error": "Transcription failed", "transcription": transcription})
-
-    # Split long transcriptions into smaller chunks
-    text_chunks = split_text(transcription)
-
-    # Summarize each chunk and combine
-    summarized_text = " ".join(
-        summarizer(chunk, max_length=100, min_length=30, do_sample=False)[0]["summary_text"]
-        for chunk in text_chunks
-    )
-
-    return jsonify({"transcription": transcription, "summary": summarized_text})
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))  # Get the port from environment variable, default to 5000
-    if not os.path.exists('uploads'):
-        os.makedirs('uploads')
+if __name__ == '__main__':
+    port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=True)
-
