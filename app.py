@@ -1,18 +1,17 @@
 from flask import Flask, request, jsonify, render_template
 import os
-import requests
 import speech_recognition as sr
+import requests
 from pydub import AudioSegment
 
 app = Flask(__name__)
 
-# Get Hugging Face API Key from environment variables (GitHub Secret)
-HUGGINGFACE_API_KEY = os.getenv("HUGGINGFACE_API_KEY")
+# Hugging Face API Key (Replace with your actual key)
+HF_API_KEY = "your_huggingface_api_key"
+HF_API_URL = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
+HEADERS = {"Authorization": f"Bearer {HF_API_KEY}"}
 
-# Hugging Face API URL for summarization
-HF_SUMMARIZATION_URL = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
-
-# Function to transcribe audio
+# Transcribe each audio chunk
 def transcribe_audio(file_path):
     recognizer = sr.Recognizer()
     audio_file = sr.AudioFile(file_path)
@@ -24,14 +23,14 @@ def transcribe_audio(file_path):
             return transcription
     except Exception as e:
         print(f"Transcription error: {str(e)}")
-        return None
+        raise
 
-# Split audio into 30-second chunks
+# Split audio into chunks
 def split_audio(file_path, chunk_length_ms=30000):
     audio = AudioSegment.from_wav(file_path)
     total_length_ms = len(audio)
     chunks = []
-
+    
     for i in range(0, total_length_ms, chunk_length_ms):
         chunk = audio[i:i+chunk_length_ms]
         chunk_filename = f"{file_path}_chunk{i}.wav"
@@ -42,16 +41,16 @@ def split_audio(file_path, chunk_length_ms=30000):
 
 # Function to summarize text using Hugging Face API
 def summarize_text(text):
-    headers = {"Authorization": f"Bearer {HUGGINGFACE_API_KEY}"}
-    payload = {"inputs": text, "parameters": {"max_length": 130, "min_length": 30, "do_sample": False}}
+    try:
+        response = requests.post(HF_API_URL, headers=HEADERS, json={"inputs": text})
+        response_json = response.json()
+        
+        if "error" in response_json:
+            return f"API Error: {response_json['error']}"
 
-    response = requests.post(HF_SUMMARIZATION_URL, headers=headers, json=payload)
-
-    if response.status_code == 200:
-        return response.json()[0]["summary_text"]
-    else:
-        print(f"Summarization API error: {response.text}")
-        return None
+        return response_json[0]["summary_text"]
+    except Exception as e:
+        return f"Summarization API error: {str(e)}"
 
 @app.route('/')
 def index():
@@ -63,9 +62,11 @@ def summarize():
         return jsonify({"error": "No file part"})
 
     audio_file = request.files['audio_file']
+
     if audio_file.filename == '':
         return jsonify({"error": "No selected file"})
 
+    # Save the audio file to the 'uploads' folder
     file_path = os.path.join('uploads', audio_file.filename)
     audio_file.save(file_path)
 
@@ -78,25 +79,28 @@ def summarize():
         except Exception as e:
             return jsonify({"error": f"Failed to convert audio file: {str(e)}"})
 
-    # Split and transcribe audio
+    # Split the audio into chunks
     try:
-        audio_chunks = split_audio(file_path)
-        combined_transcription = " ".join(filter(None, [transcribe_audio(chunk) for chunk in audio_chunks]))
+        audio_chunks = split_audio(file_path, chunk_length_ms=30000)  # Split into 30-second chunks
     except Exception as e:
-        return jsonify({"error": f"Processing failed: {str(e)}"})
+        return jsonify({"error": f"Audio splitting failed: {str(e)}"})
 
-    if not combined_transcription:
-        return jsonify({"error": "No transcription available"})
+    # Transcribe each audio chunk
+    combined_transcription = ""
+    try:
+        for chunk_path in audio_chunks:
+            transcription = transcribe_audio(chunk_path)
+            combined_transcription += transcription + " "
+    except Exception as e:
+        return jsonify({"error": f"Transcription failed: {str(e)}"})
 
-    # Summarize text using Hugging Face API
+    # Summarize the combined transcription using Hugging Face API
     summary = summarize_text(combined_transcription)
-    if not summary:
-        return jsonify({"error": "Summarization failed"})
 
+    # Return both transcription and summary
     return jsonify({"transcription": combined_transcription, "summary": summary})
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
     if not os.path.exists('uploads'):
         os.makedirs('uploads')
-    app.run(host="0.0.0.0", port=port, debug=True)
+    app.run(debug=True)
