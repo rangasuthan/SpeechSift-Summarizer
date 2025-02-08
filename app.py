@@ -7,7 +7,7 @@ from pydub import AudioSegment
 app = Flask(__name__)
 
 # Hugging Face API Key (Replace with your actual key)
-HF_API_KEY = "your_huggingface_api_key"
+HF_API_KEY = os.getenv("HUGGINGFACE_API_KEY")
 HF_API_URL = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
 HEADERS = {"Authorization": f"Bearer {HF_API_KEY}"}
 
