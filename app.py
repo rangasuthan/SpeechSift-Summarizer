@@ -101,6 +101,8 @@ def summarize():
     return jsonify({"transcription": combined_transcription, "summary": summary})
 
 if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))  # Get the port from environment variable, default to 5000
     if not os.path.exists('uploads'):
         os.makedirs('uploads')
-    app.run(debug=True)
+    app.run(host="0.0.0.0", port=port, debug=True)
+
