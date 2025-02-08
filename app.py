@@ -1,14 +1,15 @@
 from flask import Flask, request, jsonify, render_template
 import os
 import speech_recognition as sr
-from transformers import pipeline
+import requests
 from pydub import AudioSegment
-import math
 
 app = Flask(__name__)
 
-# Initialize the summarization pipeline with the specified model
-summarizer = pipeline("summarization", model="sshleifer/distilbart-cnn-12-6", revision="a4f8f3e")
+# Hugging Face API Key (Replace with your actual key)
+HF_API_KEY = "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"
+HF_API_URL = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
+HEADERS = {"Authorization": f"Bearer {HF_API_KEY}"}
 
 # Transcribe each audio chunk
 def transcribe_audio(file_path):
@@ -30,7 +31,6 @@ def split_audio(file_path, chunk_length_ms=30000):
     total_length_ms = len(audio)
     chunks = []
     
-    # Divide audio into chunks of chunk_length_ms duration
     for i in range(0, total_length_ms, chunk_length_ms):
         chunk = audio[i:i+chunk_length_ms]
         chunk_filename = f"{file_path}_chunk{i}.wav"
@@ -38,6 +38,19 @@ def split_audio(file_path, chunk_length_ms=30000):
         chunks.append(chunk_filename)
 
     return chunks
+
+# Function to summarize text using Hugging Face API
+def summarize_text(text):
+    try:
+        response = requests.post(HF_API_URL, headers=HEADERS, json={"inputs": text})
+        response_json = response.json()
+        
+        if "error" in response_json:
+            return f"API Error: {response_json['error']}"
+
+        return response_json[0]["summary_text"]
+    except Exception as e:
+        return f"Summarization API error: {str(e)}"
 
 @app.route('/')
 def index():
@@ -81,11 +94,8 @@ def summarize():
     except Exception as e:
         return jsonify({"error": f"Transcription failed: {str(e)}"})
 
-    # Summarize the combined transcription
-    try:
-        summary = summarizer(combined_transcription, max_length=130, min_length=30, do_sample=False)[0]['summary_text']
-    except Exception as e:
-        return jsonify({"error": f"Summarization failed: {str(e)}"})
+    # Summarize the combined transcription using Hugging Face API
+    summary = summarize_text(combined_transcription)
 
     # Return both transcription and summary
     return jsonify({"transcription": combined_transcription, "summary": summary})
@@ -93,5 +103,4 @@ def summarize():
 if __name__ == "__main__":
     if not os.path.exists('uploads'):
         os.makedirs('uploads')
-    app.run()
-
+    app.run(debug=True)
