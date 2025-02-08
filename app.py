@@ -1,6 +1,9 @@
 from flask import Flask, request, jsonify, render_template
+import os
 import speech_recognition as sr
 from transformers import pipeline
+from pydub import AudioSegment
+import math
 
 app = Flask(__name__)
 
