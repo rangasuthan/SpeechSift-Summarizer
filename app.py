@@ -10,7 +10,7 @@ app = Flask(__name__)
 HUGGINGFACE_API_KEY = os.getenv("HUGGINGFACE_API_KEY")
 
 # Hugging Face API URL for summarization
-HF_SUMMARIZATION_URL = "https://api-inference.huggingface.co/models/sshleifer/distilbart-cnn-12-6"
+HF_SUMMARIZATION_URL = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
 
 # Function to transcribe audio
 def transcribe_audio(file_path):
