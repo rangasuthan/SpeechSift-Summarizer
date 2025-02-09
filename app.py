@@ -8,7 +8,7 @@ app = Flask(__name__)
 
 # Hugging Face Inference API Endpoint & Token
 HF_API_URL = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
-HF_API_TOKEN = "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"  # Replace with your Hugging Face API Token
+HF_API_TOKEN = "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"  
 HEADERS = {"Authorization": f"Bearer {HF_API_TOKEN}"}
 
 # Convert speech to text
